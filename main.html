@@ -1,0 +1,217 @@
+import React, { useState, useMemo, useCallback } from 'react';
+import { RefreshCcw, CheckCircle, XCircle, ChevronDown, ChevronUp } from 'lucide-react';
+
+// --- Core Deduplication Logic ---
+
+/**
+ * Creates a stable, hashable key for any given JavaScript object (record).
+ * This ensures that two objects with the same content but different key orders
+ * are considered identical for deduplication purposes.
+ * * @param {Object} record - The data object to be keyed.
+ * @returns {string} A JSON string representing the stable key.
+ */
+const createRecordKey = (record) => {
+  try {
+    // 1. Get all key-value pairs (entries) from the object.
+    const entries = Object.entries(record);
+
+    // 2. Sort the entries lexicographically by key. This normalizes the object order.
+    entries.sort(([keyA], [keyB]) => keyA.localeCompare(keyB));
+
+    // 3. Stringify the sorted array of entries to create a unique, stable key string.
+    return JSON.stringify(entries);
+  } catch (e) {
+    // Basic error handling for non-serializable content, though unlikely with simple data
+    console.error("Error creating record key:", e);
+    return null;
+  }
+};
+
+/**
+ * Performs the data redundancy removal (deduplication).
+ * * @param {Array<Object>} records - The list of records to deduplicate.
+ * @returns {Array<Object>} The list of unique records.
+ */
+const deduplicateRecords = (records) => {
+  const uniqueKeys = new Set();
+  const uniqueRecords = [];
+
+  for (const record of records) {
+    const key = createRecordKey(record);
+    
+    // Only add the record if a key was successfully created and it's not already tracked
+    if (key && !uniqueKeys.has(key)) {
+      uniqueKeys.add(key);
+      uniqueRecords.push(record);
+    }
+  }
+
+  return uniqueRecords;
+};
+
+// --- Initial Data for Demo ---
+
+const initialDataJson = JSON.stringify([
+    {"id": 101, "name": "Alice Johnson", "email": "alice@example.com", "department": "Marketing"},
+    {"id": 102, "name": "Bob Smith", "email": "bob@example.com", "department": "Sales"},
+    {"id": 101, "name": "Alice Johnson", "email": "alice@example.com", "department": "Marketing"}, // Duplicate 1
+    {"id": 103, "name": "Charlie Brown", "email": "charlie@example.com", "department": "IT"},
+    {"email": "bob@example.com", "name": "Bob Smith", "id": 102, "department": "Sales"},          // Duplicate 2 (key order changed)
+    {"id": 104, "name": "Diana Prince", "email": "diana@example.com", "department": "HR"},
+    {"id": 103, "name": "Charlie Brown", "email": "charlie@example.com", "department": "IT"},      // Duplicate 3
+    {"id": 105, "name": "Eve Adams", "email": "eve@example.com", "department": "Marketing"},
+], null, 2);
+
+
+// --- React Component ---
+
+const App = () => {
+  const [inputJson, setInputJson] = useState(initialDataJson);
+  const [outputJson, setOutputJson] = useState('');
+  const [error, setError] = useState('');
+  const [isProcessed, setIsProcessed] = useState(false);
+  const [isInputExpanded, setIsInputExpanded] = useState(true);
+
+  // Parse the input JSON whenever it changes to derive the current records array
+  const parsedRecords = useMemo(() => {
+    setError('');
+    setIsProcessed(false);
+    try {
+      const parsed = JSON.parse(inputJson);
+      if (!Array.isArray(parsed)) {
+        throw new Error("Input must be a valid JSON array of objects.");
+      }
+      return parsed;
+    } catch (e) {
+      // Catch JSON parsing errors
+      setError(e.message || "Invalid JSON format in input.");
+      return [];
+    }
+  }, [inputJson]);
+
+  // Main processing function
+  const handleProcess = useCallback(() => {
+    if (error) return; // Prevent processing if JSON is invalid
+
+    // Run the deduplication logic
+    const uniqueRecords = deduplicateRecords(parsedRecords);
+
+    // Format the output for display
+    try {
+      const formattedOutput = JSON.stringify(uniqueRecords, null, 2);
+      setOutputJson(formattedOutput);
+      setIsProcessed(true);
+    } catch (e) {
+      setError("Failed to format output data.");
+    }
+  }, [error, parsedRecords]);
+
+  // Derived metrics for the summary box
+  const originalCount = parsedRecords.length;
+  const uniqueCount = isProcessed && !error ? deduplicateRecords(parsedRecords).length : 0;
+  const redundantCount = isProcessed && !error ? originalCount - uniqueCount : 0;
+  const isInputValid = originalCount > 0 && !error;
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-4 sm:p-8 font-sans">
+      <div className="max-w-4xl mx-auto">
+        
+        {/* Header */}
+        <header className="text-center mb-8">
+          <h1 className="text-4xl font-extrabold text-blue-800 tracking-tight">
+            Data Redundancy Removal Utility
+          </h1>
+          <p className="mt-2 text-lg text-gray-600">
+            Paste your JSON array below to identify and remove duplicate records.
+          </p>
+        </header>
+
+        {/* Input/Process Section */}
+        <div className="bg-white shadow-xl rounded-xl p-6 mb-8 border border-gray-200">
+          
+          {/* Input Header */}
+          <div 
+            className="flex justify-between items-center cursor-pointer mb-4"
+            onClick={() => setIsInputExpanded(!isInputExpanded)}
+          >
+            <h2 className="text-xl font-semibold text-gray-800 flex items-center">
+              Input Data (JSON Array)
+            </h2>
+            {isInputExpanded ? <ChevronUp className="w-5 h-5 text-gray-500" /> : <ChevronDown className="w-5 h-5 text-gray-500" />}
+          </div>
+
+          {/* Input Area */}
+          {isInputExpanded && (
+            <textarea
+              className={`w-full h-64 p-3 font-mono text-sm border-2 rounded-lg 
+                          resize-none transition duration-150 ease-in-out 
+                          ${error ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:border-blue-500 focus:ring-blue-500'}`}
+              value={inputJson}
+              onChange={(e) => setInputJson(e.target.value)}
+              placeholder="Paste your JSON array of objects here..."
+            />
+          )}
+          
+          {/* Error Message */}
+          {error && (
+            <div className="mt-3 p-3 bg-red-100 text-red-700 border border-red-300 rounded-lg flex items-center">
+              <XCircle className="w-5 h-5 mr-2 flex-shrink-0" />
+              <span>Input Error: {error}</span>
+            </div>
+          )}
+
+          {/* Process Button */}
+          <div className="mt-6 text-center">
+            <button
+              onClick={handleProcess}
+              disabled={!isInputValid}
+              className={`px-8 py-3 rounded-full font-bold text-lg transition duration-200 ease-in-out shadow-lg 
+                          ${isInputValid
+                            ? 'bg-blue-600 hover:bg-blue-700 text-white transform hover:scale-105'
+                            : 'bg-gray-400 text-gray-700 cursor-not-allowed'
+                          }`}
+            >
+              <RefreshCcw className="w-5 h-5 inline mr-2" />
+              Remove Redundancy
+            </button>
+          </div>
+        </div>
+
+        {/* Results Section */}
+        {isProcessed && !error && (
+          <div className="bg-white shadow-xl rounded-xl p-6 border border-gray-200">
+            <h2 className="text-xl font-semibold text-gray-800 mb-4">
+              Deduplication Results
+            </h2>
+            
+            {/* Summary Metrics */}
+            <div className="grid grid-cols-3 gap-4 mb-6 text-center">
+              <MetricBox title="Original Records" value={originalCount} bgColor="bg-blue-50" textColor="text-blue-800" />
+              <MetricBox title="Redundant Records" value={redundantCount} bgColor="bg-red-50" textColor="text-red-800" />
+              <MetricBox title="Unique Records" value={uniqueCount} bgColor="bg-green-50" textColor="text-green-800" icon={<CheckCircle className="w-6 h-6" />} />
+            </div>
+
+            {/* Output Display */}
+            <h3 className="text-lg font-medium text-gray-700 mb-2">
+              Unique Data Output
+            </h3>
+            <pre className="bg-gray-800 text-green-400 p-4 rounded-lg overflow-x-auto text-sm">
+              {outputJson}
+            </pre>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Simple Component for Displaying Metrics
+const MetricBox = ({ title, value, bgColor, textColor, icon }) => (
+  <div className={`p-4 rounded-xl ${bgColor} flex flex-col items-center justify-center`}>
+    {icon && <div className={`mb-1 ${textColor}`}>{icon}</div>}
+    <div className={`text-3xl font-bold ${textColor}`}>{value}</div>
+    <div className={`text-sm font-medium ${textColor} opacity-80 mt-1`}>{title}</div>
+  </div>
+);
+
+export default App;
